@@ -5,28 +5,65 @@
 #include <random>
 #include <cassert>
 
+namespace sycl = cl::sycl;
 
 void inplace_sort_scalar(std::vector<int> &v) {
     std::sort(v.begin(), v.end());
 }
 
+
+#define vsz 1024
 void inplace_sort_parallel(std::vector<int> &v) {
-    using namespace cl::sycl;
-    buffer<int, 1> d_v(v);
-    queue q;
-    q.submit([&](handler &cgh) {
-            auto acc = d_v.get_access<access::mode::read_write>();
-            cgh.parallel_for<class BitonicSort>(range<1> {v.size()}, [=](id<1> i) {
-                acc[i] = 4;
-            });
-    });
+    {
+        sycl::device dev = sycl::device(sycl::gpu_selector());
+        sycl::queue q(dev);
+        sycl::buffer<int, 1> d_v(v.data(), v.size());
+
+        sycl::nd_range<1> nd(sycl::range<1>(v.size()), sycl::range<1>(v.size()));
+        q.submit([&](sycl::handler &cgh) {
+                auto acc = d_v.get_access<sycl::access::mode::read_write>(cgh);
+                cgh.parallel_for<class BitonicSort>(nd, [=](sycl::nd_item<1> item) {
+                    auto tid = item.get_global_id(0);
+                    auto size = item.get_global_range().size();
+                    for (uint i = 2; i <= size; i *= 2) {
+                        for (uint j = i / 2; j > 0; j /= 2) {
+                            auto comp = tid ^ j;
+                            if (comp > tid) {
+                                if ((tid & i) == 0) {
+                                    if (acc[tid] > acc[comp]) {
+                                        std::swap(acc[tid], acc[comp]);
+                                    }
+                                }
+                                else {
+                                    if (acc[tid] < acc[comp]) {
+                                        std::swap(acc[tid], acc[comp]);
+                                    }
+                                }
+                            }
+                            item.barrier();
+                        }
+                    }
+                    auto groupID = item.get_group(0);
+                    //acc[tid] = (cl_int)size;
+                });
+        });
+
+        const auto host_acc = d_v.get_access<sycl::access::mode::read>();
+        // TODO: refactor to use copy back
+        for (auto i = 0; i < host_acc.get_count(); ++i) {
+            v[i] = host_acc[i];
+            std::cout << host_acc[i] << " ";
+        }
+        std::cout << std::endl;
+        
+    }
 }
 
 bool verify(std::vector<int> &v1, std::vector<int> &v2) {
     return std::equal(v1.begin(), v1.end(), v2.begin());
 }
 
-std::vector<int> generate(size_t sz) {
+std::vector<int> generate(const size_t sz) {
     assert((sz & (sz-1)) == 0 && "Size must be of power of 2");
     /*std::random_device seed;
     std::mt19937 eng {seed()};*/
@@ -46,9 +83,11 @@ void dump(std::vector<int> v) {
 }
 
 int main() {
-    const size_t sz = 8;
+    const size_t sz = 256;
     auto v1 = generate(sz);
     auto v2 = generate(sz);
+
+    dump(v2);
 
     inplace_sort_scalar(v1);
     inplace_sort_parallel(v2);
