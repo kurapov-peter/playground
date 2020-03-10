@@ -12,8 +12,8 @@ void inplace_sort_scalar(std::vector<int> &v) {
 }
 
 
-#define vsz 1024
 void inplace_sort_parallel(std::vector<int> &v) {
+    assert((16 <= v.size()) && (v.size() <= 256) && "Unsupported vector size");
     {
         sycl::device dev = sycl::device(sycl::gpu_selector());
         sycl::queue q(dev);
@@ -44,7 +44,6 @@ void inplace_sort_parallel(std::vector<int> &v) {
                         }
                     }
                     auto groupID = item.get_group(0);
-                    //acc[tid] = (cl_int)size;
                 });
         });
 
