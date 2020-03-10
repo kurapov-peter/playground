@@ -48,9 +48,7 @@ void inplace_sort_parallel(std::vector<int> &v) {
         });
 
         const auto host_acc = d_v.get_access<sycl::access::mode::read>();
-        // TODO: refactor to use copy back
         for (auto i = 0; i < host_acc.get_count(); ++i) {
-            v[i] = host_acc[i];
             std::cout << host_acc[i] << " ";
         }
         std::cout << std::endl;
